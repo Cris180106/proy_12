@@ -14,6 +14,12 @@ const cargarProductosDesdeArchivo = (productostienda) => {
         });
 };
 
+const getFechaHora = () => {
+    const ahora = new Date();
+    const fechaHora = `${ahora.getFullYear()}_${ahora.getMonth() + 1}_${ahora.getDate()}_${ahora.getHours()}_${ahora.getMinutes()}_${ahora.getSeconds()}`;
+    return fechaHora;
+};
+
 const agregarProducto = (productostienda, nuevoProducto) => {
     productostienda.listaproductos.push(nuevoProducto);
     console.log('Producto agregado:'.bgGreen);
@@ -31,18 +37,24 @@ const agregarProducto = (productostienda, nuevoProducto) => {
         });
 };
 
-const realizarCopiaSeguridad = (productostienda) => {
-    const nombrearchivoCopia = './copia_datos.json';
+const realizarCopiaSeguridad = async (productostienda) => {
+    console.log('Realizando copia de seguridad'); 
+    const nombrearchivoCopia = `./copia_datos_${getFechaHora()}.json`;
     const cadenaJson = JSON.stringify(productostienda.listaproductos);
 
-    return fs.writeFile(nombrearchivoCopia, cadenaJson, 'utf-8')
-        .then(() => {
-            console.log(`Copia de seguridad de datos realizada en ${nombrearchivoCopia}`.bgBlue);
-        })
-        .catch((error) => {
-            console.error(`Error al realizar la copia de seguridad: ${error.message}`.bgRed);
-        });
+    try {
+        await fs.writeFile(nombrearchivoCopia, cadenaJson, 'utf-8');
+        console.log(`Copia de seguridad de datos realizada en ${nombrearchivoCopia}`.bgBlue);
+
+        const continuar = await nuevaOperacion('¿Desea realizar otra copia de seguridad? (si/no)');
+        if (continuar.toLowerCase() === 'si') {
+            await realizarCopiaSeguridad(productostienda);
+        }
+    } catch (error) {
+        console.error(`Error al realizar la copia de seguridad: ${error.message}`.bgRed);
+    }
 };
+
 
 module.exports = {
     cargarProductosDesdeArchivo,

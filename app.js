@@ -5,11 +5,8 @@ const readline = require('readline').createInterface({
     output: process.stdout
 });
 
-const {
-    cargarProductosDesdeArchivo,
-    agregarProducto,
-    realizarCopiaSeguridad
-} = require('./proy_modules/functions');
+const { cargarProductosDesdeArchivo, agregarProducto, realizarCopiaSeguridad, getFechaHora } = require('./proy_modules/functions');
+
 
 class Producto {
     constructor(codigo = '', nombre = '', inventario = 0, precio = 0) {
@@ -63,6 +60,21 @@ class ProductosTienda {
             console.log(`No se encontró ningún producto con el código ${codigo}`.bgRed);
         }
     }
+
+    generarFacturaGuardada() {
+        if (this.ultimaFactura) {
+            console.log('=== FACTURA GENERADA ==='.cyan);
+            console.log(`Comprador: ${this.ultimaFactura.comprador.nombre}`.cyan);
+            console.log(`ID o Cédula: ${this.ultimaFactura.comprador.id}`.cyan);
+            console.log(`Correo Electrónico: ${this.ultimaFactura.comprador.correo}`.cyan);
+            console.log(`Producto: ${this.ultimaFactura.producto.nombre}`.cyan);
+            console.log(`Cantidad: ${this.ultimaFactura.producto.cantidad}`.cyan);
+            console.log(`Precio Unitario: ${this.ultimaFactura.producto.precioUnitario}`.cyan);
+            console.log(`Total a Pagar: ${this.ultimaFactura.producto.total}`.cyan);
+        } else {
+            console.log('No hay ninguna factura generada previamente.'.bgRed);
+        }
+    }
 }
 
 const mostrarMenu = () => {
@@ -71,8 +83,9 @@ const mostrarMenu = () => {
         console.log('2'.magenta, 'Lista de productos');
         console.log('3'.magenta, 'Borrar un producto');
         console.log('4'.magenta, 'Comprar producto');
-        console.log('5'.magenta, 'Realizar copia de seguridad');
-        console.log('6'.magenta, 'Finalizar programa\n');
+        console.log('5'.magenta, 'Realizar copia de seguridad / Ver copias de seguridad');
+        console.log('6'.magenta, 'Generar factura');
+        console.log('7'.magenta, 'Finalizar programa\n');
 
         readline.question('Opción: ', (opt) => {
             resolve(opt);
@@ -148,6 +161,69 @@ const realizarCompra = (productostienda) => {
     });
 };
 
+const nuevaOperacion = (mensaje) => {
+    return new Promise((resolve) => {
+        readline.question(`${mensaje} (si/no): `, (respuesta) => {
+            resolve(respuesta);
+        });
+    });
+};
+
+const gestionarCopiaSeguridad = async (productostienda) => {
+    console.clear();
+    console.log('=== GESTIONAR COPIAS DE SEGURIDAD ==='.cyan);
+
+    const subopcion = await nuevaOperacion('1. Realizar copia de seguridad\n2. Ver copias de seguridad\nIngrese la subopción');
+
+    switch (subopcion) {
+        case '1':
+            await realizarCopiaSeguridad(productostienda);
+            break;
+
+        case '2':
+            await verCopiasDeSeguridad(productostienda);
+            break;
+
+        default:
+            console.log('Subopción no válida'.bgRed);
+    }
+};
+
+const verCopiasDeSeguridad = async (productostienda) => {
+    console.clear();
+    console.log('=== LISTA DE COPIAS DE SEGURIDAD ==='.cyan);
+
+    try{
+        const files = await fs.readdir('./', 'utf-8');
+        const copiasDeSeguridad = files.filter(file => /^copia_datos_\d+_\d+_\d+_\d+_\d+_\d+\.json$/i.test(file));
+
+        if (copiasDeSeguridad.length > 0) {
+            copiasDeSeguridad.forEach((copia, index) => {
+                console.log(`[${index + 1}] - ${copia}`.cyan);
+            });
+
+            const seleccion = await nuevaOperacion('Ingrese el número de la copia de seguridad para restaurar');
+            const seleccionIndex = parseInt(seleccion) - 1;
+
+            if (!isNaN(seleccionIndex) && seleccionIndex >= 0 && seleccionIndex < copiasDeSeguridad.length) {
+                const seleccionArchivo = `./${copiasDeSeguridad[seleccionIndex]}`;
+
+                const data = await fs.readFile(seleccionArchivo, 'utf-8');
+                productostienda.listaproductos = JSON.parse(data);
+                console.log(`Datos restaurados desde ${seleccionArchivo}`.bgBlue);
+            } else {
+                console.log('Selección de copia de seguridad no válida'.bgRed);
+            }
+        } else {
+            console.log('No hay copias de seguridad disponibles'.bgYellow);
+        }
+    } catch (error) {
+        console.error(`Error al leer el directorio: ${error.message}`.bgRed);
+    }
+
+    await pausa();
+};
+
 const main = async () => {
     console.clear();
     let productostienda = new ProductosTienda();
@@ -164,7 +240,10 @@ const main = async () => {
                 console.log('=== AGREGAR NUEVO PRODUCTO ==='.cyan);
                 const nuevoProducto = await obtenerDetallesProducto();
                 await agregarProducto(productostienda, nuevoProducto);
-                await pausa();
+                const respuestaAgregarProducto = await nuevaOperacion('¿Desea agregar otro producto?');
+                if (respuestaAgregarProducto.toLowerCase() !== 'si') {
+                    await pausa();
+                }
                 break;
 
             case '2':
@@ -175,36 +254,45 @@ const main = async () => {
                 break;
 
             case '3':
-                console.clear();
-                console.log('=== BORRAR PRODUCTO ==='.cyan);
-                console.log('=== SELECCIONE EL PRODUCTO ==='.cyan);
-                productostienda.mostrarProductos();
+                do {
+                    console.clear();
+                    console.log('=== BORRAR PRODUCTO ==='.cyan);
+                    console.log('=== SELECCIONE EL PRODUCTO ==='.cyan);
+                    productostienda.mostrarProductos();
 
-                readline.question('Ingrese el código del producto a eliminar (o "0" para cancelar): ', async (codigo) => {
-                    if (codigo === '0') {
-                        console.log('Cancelando eliminación, ningún producto se ha eliminado.'.bgYellow);
-                    } else {
-                        const productoAEliminar = productostienda.listaproductos.find(producto => producto.codigoproducto === codigo);
+                    await new Promise((resolve) => {
+                        readline.question('Ingrese el código del producto a eliminar (o "0" para cancelar): ', async (codigo) => {
+                            if (codigo === '0') {
+                                console.log('Cancelando eliminación, ningún producto se ha eliminado.'.bgYellow);
+                            } else {
+                                const productoAEliminar = productostienda.listaproductos.find(producto => producto.codigoproducto === codigo);
 
-                        if (productoAEliminar) {
-                            productostienda.eliminarProducto(codigo);
-                            const nombrearchivo = './datos.json';
-                            const cadenaJson = JSON.stringify(productostienda.listaproductos);
+                                if (productoAEliminar) {
+                                    productostienda.eliminarProducto(codigo);
+                                    const nombrearchivo = './datos.json';
+                                    const cadenaJson = JSON.stringify(productostienda.listaproductos);
 
-                            await fs.writeFile(nombrearchivo, cadenaJson, 'utf-8')
-                                .then(() => {
-                                    console.log(`Producto con código ${codigo} eliminado y datos guardados en ${nombrearchivo}`.bgBlue);
-                                })
-                                .catch((error) => {
-                                    console.error(`Error al guardar el archivo: ${error.message}`.bgRed);
-                                });
-                        } else {
-                            console.log(`No se encontró ningún producto con el código ${codigo}`.bgRed);
-                        }
+                                    await fs.writeFile(nombrearchivo, cadenaJson, 'utf-8')
+                                        .then(() => {
+                                            console.log(`Producto con código ${codigo} eliminado y datos guardados en ${nombrearchivo}`.bgBlue);
+                                        })
+                                        .catch((error) => {
+                                            console.error(`Error al guardar el archivo: ${error.message}`.bgRed);
+                                        });
+                                } else {
+                                    console.log(`No se encontró ningún producto con el código ${codigo}`.bgRed);
+                                }
+                            }
+
+                            resolve();
+                        });
+                    });
+
+                    const respuestaBorrarProducto = await nuevaOperacion('¿Desea borrar otro producto?');
+                    if (respuestaBorrarProducto.toLowerCase() !== 'si') {
+                        break;
                     }
-
-                    await pausa();
-                });
+                } while (true);
                 break;
 
             case '4':
@@ -212,21 +300,29 @@ const main = async () => {
                 break;
 
             case '5':
-                await realizarCopiaSeguridad(productostienda);
+                await gestionarCopiaSeguridad(productostienda);
                 break;
+
 
             case '6':
-                console.log('=== PROGRAMA FINALIZADO ==='.bgMagenta);
-                break;
-
-            default:
-                console.log('Opción no válida. Por favor, elige una opción válida.'.bgRed);
+                console.clear();
+                console.log('=== GENERAR FACTURA ==='.cyan);
+                productostienda.generarFacturaGuardada();
                 await pausa();
                 break;
-        }
-    } while (opcion !== '6');
 
-    readline.close();
-};
-
-main();
+                case '7':
+                    console.log('=== PROGRAMA FINALIZADO ==='.bgMagenta);
+                    break;
+    
+                default:
+                    console.log('Opción no válida. Por favor, elige una opción válida.'.bgRed);
+                    await pausa();
+                    break;
+            }
+        } while (opcion !== '7');
+    
+        readline.close();
+    };
+    
+    main();
